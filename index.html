@@ -1,0 +1,809 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b2c3d">
+<title>Home</title>
+<style>
+  :root {
+    --ink: rgba(244, 238, 226, 0.92);
+    --dim: rgba(244, 238, 226, 0.62);
+    --tile: rgba(7, 26, 38, 0.58);
+    --tile-hover: rgba(10, 38, 54, 0.74);
+    --edge: rgba(244, 238, 226, 0.2);
+    --mono: ui-monospace, "Geist Mono", "SF Mono", Menlo, Consolas, monospace;
+    --serif: "Noto Serif Display", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  }
+  body.dark {
+    --tile: rgba(3, 6, 11, 0.68);
+    --tile-hover: rgba(8, 14, 24, 0.82);
+    --edge: rgba(244, 238, 226, 0.14);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #06070a; overflow: hidden; }
+
+  /* layers, back to front: sky, stars, engine, second engine, UI, switcher */
+  #sky, #stars, #stage, #stage2 { position: fixed; left: 0; top: 0; width: 100%; height: 100%; }
+  #sky { display: none; z-index: 0; }
+  #stars { display: none; z-index: 1; }
+  #stage { z-index: 2; }
+  #stage2 { z-index: 3; pointer-events: none; }
+
+  /* the UI sits over the scene but lets the pointer through, so the animals still react */
+  #ui { position: fixed; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; pointer-events: none; padding: 24px; }
+
+  #clock { font: 300 clamp(72px, 15vw, 210px)/1 var(--serif); letter-spacing: -0.02em; color: var(--ink);
+    text-shadow: 0 2px 36px rgba(2, 16, 26, 0.75), 0 0 2px rgba(2, 16, 26, 0.5); }
+  #clock small { font-size: 0.22em; letter-spacing: 0.08em; margin-left: 0.25em; color: var(--dim);
+    font-family: var(--mono); text-transform: uppercase; }
+  #date { margin-top: 10px; font: 13px/1 var(--mono); letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--dim); text-shadow: 0 0 6px rgba(2, 10, 16, 0.95), 0 1px 14px rgba(2, 16, 26, 0.9); }
+
+  #links { display: flex; gap: clamp(18px, 3.2vw, 44px); margin-top: clamp(30px, 7vh, 72px); }
+  .slot { position: relative; pointer-events: auto; }
+  .spot { display: flex; flex-direction: column; align-items: center; gap: 12px; text-decoration: none;
+    pointer-events: auto; outline: none; }
+  button.spot { border: 0; background: none; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; }
+  .tile { position: relative; width: clamp(92px, 9.5vw, 132px); aspect-ratio: 1; display: grid;
+    place-items: center; background: var(--tile); border: 1px solid var(--edge);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    box-shadow: 0 10px 30px rgba(1, 12, 20, 0.45);
+    transition: transform .18s ease, border-color .18s ease, background .18s ease; }
+  /* the site's own icon sits on a light plate, so dark icons (black logos) stay visible on the dark tile */
+  .tile img { width: 54%; height: 54%; padding: 7%; object-fit: contain; image-rendering: auto;
+    border-radius: 22%; background: rgba(244, 238, 226, 0.94); }
+  .spot.empty .tile { border-style: dashed; }
+  .spot.empty .letter { color: var(--dim); font-weight: 300; }
+  .tile .letter { font: 500 clamp(30px, 3.4vw, 46px)/1 var(--mono); color: var(--accent); letter-spacing: -0.04em; }
+  .tile .key { position: absolute; right: 7px; bottom: 5px; font: 10px/1 var(--mono); color: var(--dim); opacity: 0.8; }
+  .tile::before, .tile::after { content: ""; position: absolute; width: 9px; height: 9px;
+    border: 1px solid var(--accent); opacity: 0.85; transition: opacity .18s; }
+  .tile::before { left: -1px; top: -1px; border-right: 0; border-bottom: 0; }
+  .tile::after { right: -1px; bottom: -1px; border-left: 0; border-top: 0; }
+  .name { font: 12px/1 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim);
+    text-shadow: 0 0 6px rgba(2, 10, 16, 0.95), 0 1px 12px rgba(2, 16, 26, 0.9); transition: color .18s; }
+  .spot:hover .tile, .spot:focus-visible .tile { transform: translateY(-4px); border-color: var(--accent);
+    background: var(--tile-hover); }
+  .spot:hover .name, .spot:focus-visible .name { color: var(--ink); }
+
+  /* small "edit" button on each filled tile, shown on hover (always faintly on touch screens) */
+  .edit { position: absolute; top: 6px; right: 6px; z-index: 2; padding: 4px 6px; border: 0;
+    background: rgba(3, 10, 16, 0.6); color: var(--dim); font: 9px/1 var(--mono); letter-spacing: 0.12em;
+    text-transform: uppercase; cursor: pointer; opacity: 0; transition: opacity .15s; }
+  .slot:hover .edit, .edit:focus-visible { opacity: 1; }
+  .edit:hover { color: var(--ink); }
+  @media (hover: none) { .edit { opacity: 0.7; } }
+
+  /* add / edit panel */
+  #editor { position: fixed; inset: 0; z-index: 8; display: grid; place-items: center; padding: 16px;
+    background: rgba(2, 8, 14, 0.5); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+  #editor[hidden] { display: none; }
+  #editor .panel { width: min(380px, 100%); padding: 22px; background: rgba(5, 18, 28, 0.94);
+    border: 1px solid var(--edge); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); color: var(--ink);
+    font: 12px/1.4 var(--mono); }
+  #editor h2 { margin: 0 0 16px; font: 500 11px/1 var(--mono); letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--dim); }
+  #editor label { display: block; margin-bottom: 14px; font-size: 10px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--dim); }
+  #editor input { display: block; width: 100%; margin-top: 4px; padding: 8px 0; border: 0;
+    border-bottom: 1px solid var(--edge); background: transparent; color: var(--ink); outline: none;
+    font: 15px/1.2 var(--mono); letter-spacing: 0; text-transform: none; }
+  #editor input:focus { border-bottom-color: #f1e8d8; }
+  #editor .err { min-height: 16px; margin: 0 0 8px; color: #ff9b8a; }
+  #editor .row { display: flex; gap: 6px; align-items: center; }
+  #editor .row button { padding: 9px 12px; border: 1px solid var(--edge); background: transparent;
+    color: var(--ink); font: 11px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; }
+  #editor .row button:hover { background: rgba(244, 238, 226, 0.12); }
+  #editor .row .go { background: rgba(244, 238, 226, 0.16); }
+  #editor .row .spacer { flex: 1; }
+  #editor .reset { margin-top: 14px; padding: 0; border: 0; background: none; color: var(--dim);
+    font: 10px/1 var(--mono); letter-spacing: 0.08em; text-decoration: underline; cursor: pointer; }
+
+  /* scene + theme switcher */
+  #switch { position: fixed; z-index: 5; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex;
+    align-items: center; gap: 2px; padding: 4px; background: var(--tile); border: 1px solid var(--edge);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); opacity: 0.55; transition: opacity .2s;
+    max-width: calc(100vw - 24px); }
+  #switch:hover, #switch:focus-within { opacity: 1; }
+  #switch button { padding: 8px 12px; border: 0; background: transparent; color: var(--dim);
+    font: 11px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; white-space: nowrap; }
+  #switch button:hover { color: var(--ink); }
+  #switch button.on { color: var(--ink); background: rgba(244, 238, 226, 0.12); }
+  #switch .sep { width: 1px; align-self: stretch; margin: 4px 6px; background: var(--edge); }
+
+  /* tune panel: a gear in the top corner opens sliders for the current scene */
+  #gear { position: fixed; z-index: 7; top: 14px; right: 14px; width: 36px; height: 36px; padding: 0;
+    display: grid; place-items: center; background: var(--tile); border: 1px solid var(--edge); color: var(--dim);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); cursor: pointer; opacity: 0.55;
+    transition: opacity .2s, color .2s; }
+  #gear:hover, #gear:focus-visible, #gear.on { opacity: 1; color: var(--ink); }
+  #gear svg { width: 18px; height: 18px; display: block; }
+  #tune { position: fixed; z-index: 7; top: 58px; right: 14px; width: min(290px, calc(100vw - 28px)); padding: 18px 18px 14px;
+    background: rgba(5, 18, 28, 0.92); border: 1px solid var(--edge); box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); color: var(--ink); font: 12px/1.4 var(--mono); }
+  body.dark #tune { background: rgba(3, 6, 11, 0.94); }
+  #tune[hidden] { display: none; }
+  #tune h2 { margin: 0 0 14px; font: 500 11px/1 var(--mono); letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); }
+  #tune .ctl { margin-bottom: 14px; }
+  #tune .top { display: flex; justify-content: space-between; margin-bottom: 7px; font-size: 10px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--dim); }
+  #tune .top output { color: var(--ink); letter-spacing: 0.06em; }
+  #tune input[type=range] { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 18px; margin: 0;
+    background: transparent; cursor: pointer; }
+  #tune input[type=range]::-webkit-slider-runnable-track { height: 3px; background: var(--edge); }
+  #tune input[type=range]::-moz-range-track { height: 3px; background: var(--edge); }
+  #tune input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 18px; margin-top: -7.5px;
+    background: #f1e8d8; border: 0; border-radius: 0; }
+  #tune input[type=range]::-moz-range-thumb { width: 12px; height: 18px; background: #f1e8d8; border: 0; border-radius: 0; }
+  #tune input[type=range]:focus-visible { outline: 1px solid var(--dim); outline-offset: 2px; }
+  #tune #t-hue::-webkit-slider-runnable-track { height: 5px; background: linear-gradient(90deg,
+    #3fa9d6, #5a6fe6, #b04bd8, #e8553f, #e6b94a, #7fd65a, #3fa9d6); }
+  #tune #t-hue::-moz-range-track { height: 5px; background: linear-gradient(90deg,
+    #3fa9d6, #5a6fe6, #b04bd8, #e8553f, #e6b94a, #7fd65a, #3fa9d6); }
+  #tune #t-hue::-webkit-slider-thumb { margin-top: -6.5px; }
+  #tune .ends { display: flex; justify-content: space-between; margin-top: 2px; font-size: 9px; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--dim); opacity: 0.7; }
+  #tune .reset { margin-top: 2px; padding: 0; border: 0; background: none; color: var(--dim);
+    font: 10px/1 var(--mono); letter-spacing: 0.08em; text-decoration: underline; cursor: pointer; }
+  #tune .note { margin: 8px 0 0; font-size: 9px; line-height: 1.4; color: var(--dim); opacity: 0.75; }
+
+  @media (max-width: 520px) {
+    #links { gap: 10px; }
+    .tile { width: calc((100vw - 48px - 30px) / 4); }
+    .name { font-size: 10px; letter-spacing: 0.1em; }
+    #switch button { padding: 8px 6px; font-size: 10px; letter-spacing: 0.06em; }
+  }
+  @media (prefers-reduced-motion: reduce) { .tile { transition: none; } }
+</style>
+</head>
+<body>
+<div id="sky"></div>
+<canvas id="stars"></canvas>
+<div id="stage"></div>
+<div id="stage2"></div>
+
+<main id="ui">
+  <div id="clock" aria-live="off"></div>
+  <div id="date"></div>
+  <nav id="links" aria-label="Favourite sites"></nav>
+</main>
+
+<nav id="switch" aria-label="Scene and theme"></nav>
+
+<script src="ascii-life.js"></script>
+<script src="rats.js"></script>
+<script src="jellies.js"></script>
+<script>
+(function () {
+  /* ------------------------------------------------------------------
+     YOUR FOUR SPOTS.
+     The easiest way to change them: hover a tile and click "edit" (or click a "+" tile to add a link),
+     paste the address, done. The page stores what you set in this browser.
+
+     This list is what a fresh browser shows, and what "reset all links" goes back to:
+       name   label under the tile (optional, taken from the address if left out)
+       url    where the tile goes
+       icon   optional: your own image, e.g. 'icons/mail.png'. Leave it out and the site's own
+              icon is pulled from the link automatically; if none can be loaded, a letter tile is shown.
+       accent colour of the tile corners and letter fallback (optional)
+     null = an empty slot that shows "+ Add link".
+     ------------------------------------------------------------------ */
+  var LINKS = [
+    { name: 'Gmail',     url: 'https://mail.google.com/',   accent: '#e8553f' },
+    { name: 'YouTube',   url: 'https://www.youtube.com/',   accent: '#e6b94a' },
+    { name: 'Pinterest', url: 'https://www.pinterest.com/', accent: '#f1e8d8' },
+    null
+  ];
+  var CLOCK_24H = false;   // true for 13:45 instead of 1:45 PM
+
+  /* ---------- links ---------- */
+  var SLOTS = 4;
+  var ACCENTS = ['#e8553f', '#e6b94a', '#f1e8d8', '#7fc8e8'];
+  var LINKS_KEY = 'koiHomeLinks';
+  var box = document.getElementById('links');
+  var slots = [];          // what is on screen: one object (or null) per slot
+  var overrides = {};      // slots changed on the page: { "3": {...} } (null = emptied on purpose)
+
+  try {
+    var savedLinks = JSON.parse(window.localStorage.getItem(LINKS_KEY) || 'null');
+    if (savedLinks && typeof savedLinks === 'object' && !(savedLinks instanceof Array)) overrides = savedLinks;
+  } catch (eL) {}
+
+  /* "pinterest.com" or "https://www.pinterest.com/" -> a clean http(s) address, or null */
+  function cleanUrl(raw) {
+    var u;
+    raw = String(raw || '').trim();
+    if (!raw) return null;
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) raw = 'https://' + raw;
+    try { u = new URL(raw); } catch (e) { return null; }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    if (u.hostname.indexOf('.') < 0 && u.hostname !== 'localhost') return null;
+    return u.href;
+  }
+
+  /* a readable default label: mail.google.com -> "Google", www.pinterest.com -> "Pinterest" */
+  function niceName(url) {
+    var host = '', labels, label, n;
+    try { host = new URL(url).hostname; } catch (e) {}
+    if (/^[\d.]+$/.test(host) || host.indexOf(':') >= 0) return host || 'Link';   // an IP address: use it as it is
+    labels = host.replace(/^www\./, '').split('.');
+    n = labels.length;
+    label = n >= 2 ? labels[n - 2] : labels[0];
+    if (n >= 3 && label.length <= 3 && /^(co|com|org|net|ac|gov|edu)$/.test(label)) label = labels[n - 3];
+    return label ? label.charAt(0).toUpperCase() + label.slice(1) : 'Link';
+  }
+
+  function validItem(it, index) {
+    var url;
+    if (!it || typeof it.url !== 'string') return null;
+    url = cleanUrl(it.url);
+    if (!url) return null;
+    return {
+      name: String(it.name || niceName(url)).slice(0, 24),
+      url: url,
+      accent: /^#[0-9a-f]{3,8}$/i.test(it.accent || '') ? it.accent : ACCENTS[index % ACCENTS.length],
+      icon: typeof it.icon === 'string' ? it.icon : ''
+    };
+  }
+
+  function computeSlots() {
+    var k, src;
+    for (k = 0; k < SLOTS; k++) {
+      src = Object.prototype.hasOwnProperty.call(overrides, String(k)) ? overrides[k] : LINKS[k];
+      slots[k] = validItem(src, k);
+    }
+  }
+
+  function persistLinks() {
+    try { window.localStorage.setItem(LINKS_KEY, JSON.stringify(overrides)); } catch (e) {}
+  }
+
+  /* where to get a site's icon, best first: the icon service (large, crisp), then the site's own
+     /favicon.ico, then a second service. An icon you set yourself is used as it is. */
+  function iconSources(item) {
+    var u;
+    if (item.icon) return [item.icon];
+    try { u = new URL(item.url); } catch (e) { return []; }
+    return [
+      'https://www.google.com/s2/favicons?sz=128&domain_url=' + encodeURIComponent(u.origin),
+      u.origin + '/favicon.ico',
+      'https://icons.duckduckgo.com/ip3/' + u.hostname + '.ico'
+    ];
+  }
+
+  function makeSlot(item, index) {
+    var wrap = document.createElement('div'), el, tile, name, l, k, srcs, n, img, edit;
+    wrap.className = 'slot';
+    wrap.style.setProperty('--accent', item ? item.accent : ACCENTS[index % ACCENTS.length]);
+
+    tile = document.createElement('span');
+    tile.className = 'tile';
+    name = document.createElement('span');
+    name.className = 'name';
+
+    function appendKey() {
+      k = document.createElement('span');
+      k.className = 'key';
+      k.textContent = String(index + 1);
+      tile.appendChild(k);
+    }
+    function letter(text) {
+      tile.innerHTML = '';
+      l = document.createElement('span');
+      l.className = 'letter';
+      l.textContent = text;
+      tile.appendChild(l);
+      if (item) appendKey();
+    }
+
+    if (!item) {                                         // empty slot: a "+" tile
+      el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'spot empty';
+      el.title = 'Add a link';
+      el.onclick = function () { openEditor(index); };
+      letter('+');
+      name.textContent = 'Add link';
+      el.appendChild(tile);
+      el.appendChild(name);
+      wrap.appendChild(el);
+      return wrap;
+    }
+
+    el = document.createElement('a');
+    el.className = 'spot';
+    el.href = item.url;
+    el.title = item.name + '  (press ' + (index + 1) + ')';
+
+    /* pull the icon straight from the link; fall through the sources, then to a letter tile */
+    srcs = iconSources(item);
+    n = 0;
+    img = document.createElement('img');
+    img.alt = '';
+    img.referrerPolicy = 'no-referrer';
+    function next() {
+      if (n >= srcs.length) { letter(item.name.charAt(0).toUpperCase() + item.name.charAt(1).toLowerCase()); return; }
+      img.src = srcs[n++];
+    }
+    img.onerror = next;
+    img.onload = function () {
+      /* the icon service answers with a 16px grey globe when it knows nothing about a site */
+      var min = (!item.icon && n === 1) ? 17 : 1;
+      if (img.naturalWidth && img.naturalWidth < min) next();
+    };
+    tile.appendChild(img);
+    appendKey();
+    next();
+
+    name.textContent = item.name;
+    el.appendChild(tile);
+    el.appendChild(name);
+    wrap.appendChild(el);
+
+    edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'edit';
+    edit.textContent = 'edit';
+    edit.title = 'Change this link';
+    edit.onclick = function () { openEditor(index); };
+    wrap.appendChild(edit);
+    return wrap;
+  }
+
+  function renderLinks() {
+    var k;
+    box.innerHTML = '';
+    for (k = 0; k < SLOTS; k++) box.appendChild(makeSlot(slots[k], k));
+  }
+
+  /* ---------- add / edit panel ---------- */
+  var editor = document.createElement('div');
+  editor.id = 'editor';
+  editor.hidden = true;
+  editor.innerHTML =
+    '<form class="panel" autocomplete="off" novalidate>' +
+      '<h2 id="edtitle">Link</h2>' +
+      '<label>Web address<input id="edurl" type="text" inputmode="url" spellcheck="false" placeholder="pinterest.com"></label>' +
+      '<label>Name (optional)<input id="edname" type="text" maxlength="24" spellcheck="false" placeholder="taken from the address"></label>' +
+      '<p class="err" id="ederr" role="alert"></p>' +
+      '<div class="row"><button type="submit" class="go">Save</button>' +
+        '<button type="button" id="edremove">Remove</button><span class="spacer"></span>' +
+        '<button type="button" id="edcancel">Cancel</button></div>' +
+      '<button type="button" class="reset" id="edreset">reset all links to the list in the file</button>' +
+    '</form>';
+  document.body.appendChild(editor);
+
+  var edUrl = document.getElementById('edurl'), edName = document.getElementById('edname');
+  var edErr = document.getElementById('ederr'), edRemove = document.getElementById('edremove');
+  var edSlot = -1;
+
+  function openEditor(index) {
+    var cur = slots[index];
+    edSlot = index;
+    document.getElementById('edtitle').textContent = (cur ? 'Change link ' : 'Add link ') + (index + 1);
+    edUrl.value = cur ? cur.url : '';
+    edName.value = cur ? cur.name : '';
+    edErr.textContent = '';
+    edRemove.style.display = cur ? '' : 'none';
+    editor.hidden = false;
+    setTimeout(function () { edUrl.focus(); edUrl.select(); }, 0);
+  }
+  function closeEditor() { editor.hidden = true; edSlot = -1; }
+  function afterChange() { persistLinks(); computeSlots(); renderLinks(); closeEditor(); }
+
+  editor.querySelector('form').addEventListener('submit', function (e) {
+    var url = cleanUrl(edUrl.value), old = slots[edSlot], name = edName.value.trim();
+    e.preventDefault();
+    if (!url) { edErr.textContent = 'That does not look like a web address (try pinterest.com).'; return; }
+    /* if the name still matches the old address's automatic name and the address changed, name it afresh */
+    if (old && old.url !== url && (!name || name === old.name)) name = '';
+    overrides[edSlot] = { name: name || niceName(url), url: url,
+      accent: old ? old.accent : ACCENTS[edSlot % ACCENTS.length], icon: old && old.url === url ? old.icon : '' };
+    afterChange();
+  });
+  edRemove.onclick = function () { overrides[edSlot] = null; afterChange(); };
+  document.getElementById('edcancel').onclick = closeEditor;
+  document.getElementById('edreset').onclick = function () { overrides = {}; afterChange(); };
+  editor.addEventListener('mousedown', function (e) { if (e.target === editor) closeEditor(); });
+
+  computeSlots();
+  renderLinks();
+
+  /* ---------- clock ---------- */
+  var clock = document.getElementById('clock');
+  var dateEl = document.getElementById('date');
+  var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+    'September', 'October', 'November', 'December'];
+
+  function tick() {
+    var d = new Date(), h = d.getHours(), m = d.getMinutes();
+    var suffix = '';
+    if (!CLOCK_24H) { suffix = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; }
+    else if (h < 10) h = '0' + h;
+    clock.textContent = h + ':' + (m < 10 ? '0' + m : m);
+    if (suffix) {
+      var s = document.createElement('small');
+      s.textContent = suffix;
+      clock.appendChild(s);
+    }
+    dateEl.textContent = DAYS[d.getDay()] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate();
+    document.title = clock.textContent.replace(/\s/g, '');
+  }
+  tick();
+  setInterval(tick, 5000);
+
+  /* ---------- scenes ----------
+     Every scene is drawn by the same engine, as tiles with glyphs on one grid.
+     light = the original colours, dark = the same scenes after dark. */
+  var GRID_COLS = 300;                       // cells across the screen (150 = chunky, 300 = fine); stars sit on the same grid
+  var COMMON = { grid: false, glow: false, pointer: 'flee', fps: 30, maxDpr: 1.5, cols: GRID_COLS };   // glow: false = no light spot under the mouse
+
+  var SCENES = {
+    koi: {
+      label: 'Koi',
+      build: function (dark) {
+        return [{ target: 'stage', opts: {
+          scene: 'koi', palette: 'mix', count: 9,
+          size: 0.8,                                    // a bit smaller than the engine default
+          waterMood: dark ? 'moon' : 'sun', waterLight: dark ? 0.7 : 1 } }];
+      }
+    },
+    frog: {
+      label: 'Frogs', sizeMax: 1.25,              // big pads would bury the clock
+      build: function (dark) {
+        return [{ target: 'stage', opts: {
+          scene: 'frog', palette: 'leaf',
+          size: 0.8,                                    // same smaller scale as the koi; keeps pads off the clock
+          waterMood: dark ? 'moon' : 'leaves', waterLight: dark ? 0.7 : 1 } }];
+      }
+    },
+    rat: {
+      label: 'Rats', sky: true, floor: true,
+      build: function () {
+        /* palette: 'mix' = white, gray, brown, gray calico, brown calico and tricolor together.
+           Or pick one: 'white' | 'gray' | 'brown' | 'calico' | 'brownCalico' | 'tricolor' */
+        return [{ target: 'stage', opts: {
+          scene: 'rat', palette: 'mix', count: 9,
+          size: 0.8,                                    // same smaller scale as the koi and frogs
+          background: 'transparent' } }];
+      }
+    },
+    jelly: {
+      label: 'Jellyfish', sky: true, sea: true,
+      build: function () {
+        /* palette: 'mix' = pink/purple, blue and yellow together.
+           Or pick one: 'orchid' | 'blue' | 'yellow' | 'pink' | 'purple' */
+        return [{ target: 'stage', opts: {
+          scene: 'jelly', palette: 'mix', count: 9,
+          size: 0.9,
+          background: 'transparent' } }];
+      }
+    },
+    butterfly: {
+      label: 'Butterflies', sky: true,
+      build: function () {
+        /* the engine gives one palette per scene, so blue and pink are two layers of it */
+        return [
+          { target: 'stage',  opts: { scene: 'butterfly', palette: 'azure', count: 6, seed: 3, background: 'transparent' } },
+          { target: 'stage2', opts: { scene: 'butterfly', palette: 'rose',  count: 5, seed: 11, background: 'transparent' } }
+        ];
+      }
+    }
+  };
+  var ORDER = ['koi', 'frog', 'butterfly', 'rat', 'jelly'];
+  var SKY = {
+    light: 'linear-gradient(#071a29, #0f3346)',
+    dark: 'linear-gradient(#020309, #080b16)'
+  };
+  var SEA = {                                    // deep water behind the jellyfish
+    light: 'linear-gradient(#082c4a, #04152b)',
+    dark: 'linear-gradient(#030a16, #01030a)'
+  };
+  var FLOOR = {                                  // what the rats run on
+    light: 'linear-gradient(#233035, #141d21)',
+    dark: 'linear-gradient(#07090c, #0b0e13)'
+  };
+
+  var state = { scene: 'koi', dark: false };
+  var engines = [];
+  var reduceMotion = false;
+  try { reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e0) {}
+
+  /* remembered choice, then ?scene=koi|frog|butterfly|rat|jelly&theme=dark|light on top */
+  try {
+    var saved = JSON.parse(window.localStorage.getItem('koiHome') || 'null');
+    if (saved && SCENES[saved.scene]) { state.scene = saved.scene; state.dark = !!saved.dark; }
+  } catch (e1) {}
+  (function () {
+    var q = window.location.search.replace(/^\?/, '').split('&'), p, j;
+    for (j = 0; j < q.length; j++) {
+      p = q[j].split('=');
+      if (p[0] === 'scene' && SCENES[p[1]]) state.scene = p[1];
+      if (p[0] === 'theme') state.dark = p[1] === 'dark';
+    }
+  })();
+
+  function save() {
+    try { window.localStorage.setItem('koiHome', JSON.stringify(state)); } catch (e2) {}
+  }
+
+  /* ---------- stars and floor specks: glyphs on the engine's own cell grid ----------
+     The same little layer draws both: twinkling stars behind the butterflies,
+     still crumbs and pebbles under the rats. */
+  var DECO = {
+    stars: { glyphs: ['.', '.', ':', '+', '*'], tints: [[205, 224, 255], [255, 196, 224]], odds: 0.22,
+      density: 0.05, gain: 1, twinkle: true, seed: 20260101 },
+    sea: { glyphs: ['.', '.', ',', ':', '*'], tints: [[150, 205, 235], [190, 170, 240]], odds: 0.25,
+      density: 0.03, gain: 0.8, twinkle: true, seed: 20261125 },
+    floor: { glyphs: ['.', ',', '.', ':', "'"], tints: [[196, 184, 160], [150, 162, 170]], odds: 0.35,
+      density: 0.04, gain: 0.65, twinkle: false, seed: 20261124 }
+  };
+  var deco = DECO.stars;
+  var starCanvas = document.getElementById('stars');
+  var starCtx = starCanvas.getContext('2d');
+  var stars = [], starTimer = 0, starCell = 10, starDpr = 1;
+
+  function starsBuild() {
+    var w = window.innerWidth, h = window.innerHeight;
+    starDpr = Math.min(window.devicePixelRatio || 1, COMMON.maxDpr);
+    starCell = Math.max(4, Math.round(w / GRID_COLS * starDpr)) / starDpr;   // CSS px per engine cell
+    starCanvas.width = Math.round(w * starDpr);
+    starCanvas.height = Math.round(h * starDpr);
+    starCanvas.style.width = w + 'px';
+    starCanvas.style.height = h + 'px';
+    var cols = Math.ceil(w / starCell), rows = Math.ceil(h / starCell), n = Math.round(cols * rows * deco.density), k, lv, tint;
+    var seed = deco.seed;
+    function rnd() { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; }
+    stars = [];
+    for (k = 0; k < n; k++) {
+      lv = rnd();
+      lv = lv < 0.55 ? 0 : lv < 0.8 ? 1 : lv < 0.93 ? 2 : lv < 0.985 ? 3 : 4;
+      tint = rnd() < deco.odds ? deco.tints[1] : deco.tints[0];   // a few pink stars among the blue-white
+      stars.push({ x: Math.floor(rnd() * cols), y: Math.floor(rnd() * rows), lv: lv, g: deco.glyphs[lv],
+        ph: rnd() * 6.283, sp: 0.5 + rnd() * 1.6, c: tint });
+    }
+  }
+
+  function starsDraw(t) {
+    var ctx = starCtx, k, s, a, base, cell = starCell;
+    ctx.setTransform(starDpr, 0, 0, starDpr, 0, 0);
+    ctx.clearRect(0, 0, starCanvas.width, starCanvas.height);
+    ctx.font = Math.round(cell * 0.95) + 'px ui-monospace, Menlo, Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (k = 0; k < stars.length; k++) {
+      s = stars[k];
+      base = (0.22 + s.lv * 0.17) * deco.gain;
+      a = (reduceMotion || !deco.twinkle) ? base : base * (0.6 + 0.4 * Math.sin(t * s.sp + s.ph));
+      if (s.lv >= 3) {                                  // the brightest stars get a faint tile, like the creatures
+        ctx.fillStyle = 'rgba(' + s.c[0] + ',' + s.c[1] + ',' + s.c[2] + ',' + (a * 0.16).toFixed(3) + ')';
+        ctx.fillRect(s.x * cell + 0.5, s.y * cell + 0.5, cell - 1, cell - 1);
+      }
+      ctx.fillStyle = 'rgba(' + s.c[0] + ',' + s.c[1] + ',' + s.c[2] + ',' + a.toFixed(3) + ')';
+      ctx.fillText(s.g, s.x * cell + cell / 2, s.y * cell + cell / 2);
+    }
+  }
+
+  function starsStart() {
+    starsBuild();
+    starsDraw(0);
+    if (starTimer) clearInterval(starTimer);
+    if (!reduceMotion && deco.twinkle) starTimer = setInterval(function () { starsDraw(Date.now() / 1000); }, 90);
+  }
+  function starsStop() {
+    if (starTimer) clearInterval(starTimer);
+    starTimer = 0;
+  }
+
+  /* ---------- mounting ---------- */
+  function merge(a, b) {
+    var o = {}, k;
+    for (k in a) o[k] = a[k];
+    for (k in b) o[k] = b[k];
+    return o;
+  }
+
+  /* ---------- tuning: per-scene size / speed / calm-lively / hue, remembered in this browser ---------- */
+  var TUNE_KEY = 'koiHomeTune';
+  var TUNE_DEFAULT = { size: 1, speed: 1, move: 0.5, hue: 0 };
+  var tunes = {};
+  var curLayers = [];
+  try {
+    var savedTune = JSON.parse(window.localStorage.getItem(TUNE_KEY) || 'null');
+    if (savedTune && typeof savedTune === 'object') tunes = savedTune;
+  } catch (eT) {}
+
+  function tuneOf(name) {
+    var t = {}, k, src = tunes[name] || {};
+    for (k in TUNE_DEFAULT) t[k] = typeof src[k] === 'number' && isFinite(src[k]) ? src[k] : TUNE_DEFAULT[k];
+    if (SCENES[name] && SCENES[name].sizeMax && t.size > SCENES[name].sizeMax) t.size = SCENES[name].sizeMax;
+    return t;
+  }
+
+  /* what the engine gets for one layer: the scene's own options, scaled by the sliders.
+     move (calm .. lively) changes the pace a little, how long wakes and ripples last, and, for the rats and
+     jellyfish, how energetic they are (energy: 0.4 .. 1.6). */
+  function tunedOpts(base, t) {
+    var o = merge(COMMON, base), sz = base.size === undefined ? 1 : base.size, sp = base.speed === undefined ? 1 : base.speed,
+      tr = base.trail === undefined ? 0.18 : base.trail;
+    o.size = sz * t.size;
+    o.speed = sp * t.speed * (0.7 + 0.6 * t.move);
+    o.trail = Math.min(1, tr * (0.4 + 1.2 * t.move));
+    o.energy = 0.4 + 1.2 * t.move;
+    return o;
+  }
+
+  function paintHue() {
+    var h = tuneOf(state.scene).hue, f = h ? 'hue-rotate(' + Math.round(h) + 'deg)' : '';
+    document.getElementById('stage').style.filter = f;
+    document.getElementById('stage2').style.filter = f;
+  }
+
+  function applyTune() {                           // live: no restart, the animals just change
+    var t = tuneOf(state.scene), k, o;
+    for (k = 0; k < engines.length && k < curLayers.length; k++) {
+      o = tunedOpts(curLayers[k].opts, t);
+      engines[k].set({ size: o.size, speed: o.speed, trail: o.trail, energy: o.energy });
+    }
+    paintHue();
+  }
+
+  function mount() {
+    var def = SCENES[state.scene], layers = def.build(state.dark), k, el;
+    curLayers = layers;
+    for (k = 0; k < engines.length; k++) engines[k].destroy();
+    engines = [];
+    document.body.className = state.dark ? 'dark' : '';
+    var sky = document.getElementById('sky');
+    sky.style.display = def.sky ? 'block' : 'none';
+    var back = def.sea ? SEA : def.floor ? FLOOR : SKY;
+    deco = def.sea ? DECO.sea : def.floor ? DECO.floor : DECO.stars;
+    sky.style.background = state.dark ? back.dark : back.light;
+    starCanvas.style.display = def.sky ? 'block' : 'none';
+    if (def.sky) starsStart(); else starsStop();
+    for (k = 0; k < layers.length; k++) {
+      el = document.getElementById(layers[k].target);
+      engines.push(new AsciiLife(el, tunedOpts(layers[k].opts, tuneOf(state.scene))).start());
+    }
+    paintHue();
+    paintSwitch();
+    syncTune();
+    save();
+  }
+
+  /* ---------- switcher ---------- */
+  var sw = document.getElementById('switch');
+  var sceneButtons = {}, themeButton;
+
+  (function buildSwitch() {
+    var k, b, sep;
+    ORDER.forEach(function (name) {
+      b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = SCENES[name].label;
+      b.title = 'Press S to cycle scenes';
+      b.onclick = function () { state.scene = name; mount(); };
+      sceneButtons[name] = b;
+      sw.appendChild(b);
+    });
+    sep = document.createElement('span');
+    sep.className = 'sep';
+    sw.appendChild(sep);
+    themeButton = document.createElement('button');
+    themeButton.type = 'button';
+    themeButton.title = 'Press D to switch';
+    themeButton.onclick = function () { state.dark = !state.dark; mount(); };
+    sw.appendChild(themeButton);
+  })();
+
+  function paintSwitch() {
+    var name;
+    for (name in sceneButtons) sceneButtons[name].className = name === state.scene ? 'on' : '';
+    themeButton.textContent = state.dark ? 'Light' : 'Dark';
+  }
+
+  /* ---------- gear + tune panel ---------- */
+  var gear = document.createElement('button');
+  gear.id = 'gear';
+  gear.type = 'button';
+  gear.title = 'Tune the animals';
+  gear.setAttribute('aria-label', 'Tune the animals');
+  gear.setAttribute('aria-expanded', 'false');
+  gear.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+    '<circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.9 1.9M16.6 16.6l1.9 1.9M18.5 5.5l-1.9 1.9M7.4 16.6l-1.9 1.9"/></svg>';
+  document.body.appendChild(gear);
+
+  var tune = document.createElement('div');
+  tune.id = 'tune';
+  tune.hidden = true;
+  tune.innerHTML =
+    '<h2 id="t-title">Tune</h2>' +
+    '<div class="ctl"><div class="top"><span>Size</span><output id="o-size"></output></div>' +
+      '<input id="t-size" type="range" min="0.5" max="1.6" step="0.05"></div>' +
+    '<div class="ctl"><div class="top"><span>Speed</span><output id="o-speed"></output></div>' +
+      '<input id="t-speed" type="range" min="0.3" max="2" step="0.05"></div>' +
+    '<div class="ctl"><div class="top"><span>Movement</span><output id="o-move"></output></div>' +
+      '<input id="t-move" type="range" min="0" max="1" step="0.05"><div class="ends"><span>calm</span><span>lively</span></div></div>' +
+    '<div class="ctl"><div class="top"><span>Hue</span><output id="o-hue"></output></div>' +
+      '<input id="t-hue" type="range" min="-180" max="180" step="5"></div>' +
+    '<button type="button" class="reset" id="t-reset">reset this scene</button>' +
+    '<p class="note" id="t-note"></p>';
+  document.body.appendChild(tune);
+
+  var tCtl = {
+    size: document.getElementById('t-size'), speed: document.getElementById('t-speed'),
+    move: document.getElementById('t-move'), hue: document.getElementById('t-hue')
+  };
+  var tOut = {
+    size: document.getElementById('o-size'), speed: document.getElementById('o-speed'),
+    move: document.getElementById('o-move'), hue: document.getElementById('o-hue')
+  };
+
+  function moveWord(v) { return v < 0.2 ? 'very calm' : v < 0.4 ? 'calm' : v < 0.6 ? 'natural' : v < 0.8 ? 'lively' : 'very lively'; }
+
+  function syncTune() {                            // show the current scene's values
+    var t = tuneOf(state.scene), k;
+    tCtl.size.max = SCENES[state.scene].sizeMax || 1.6;
+    for (k in tCtl) tCtl[k].value = t[k];
+    tOut.size.textContent = '\u00d7' + t.size.toFixed(2);
+    tOut.speed.textContent = '\u00d7' + t.speed.toFixed(2);
+    tOut.move.textContent = moveWord(t.move);
+    tOut.hue.textContent = (t.hue > 0 ? '+' : '') + Math.round(t.hue) + '\u00b0';
+    document.getElementById('t-title').textContent = 'Tune \u00b7 ' + SCENES[state.scene].label;
+    document.getElementById('t-note').textContent = SCENES[state.scene].sky || SCENES[state.scene].floor ? '' :
+      'Hue also tints the water in this scene.';
+  }
+
+  function saveTune() {
+    try { window.localStorage.setItem(TUNE_KEY, JSON.stringify(tunes)); } catch (e3) {}
+  }
+
+  function onTune() {
+    var t = {}, k;
+    for (k in tCtl) t[k] = parseFloat(tCtl[k].value);
+    tunes[state.scene] = t;
+    saveTune();
+    syncTune();
+    applyTune();
+  }
+  Object.keys(tCtl).forEach(function (k) { tCtl[k].addEventListener('input', onTune); });
+  document.getElementById('t-reset').onclick = function () { delete tunes[state.scene]; saveTune(); syncTune(); applyTune(); };
+
+  function openTune() { syncTune(); tune.hidden = false; gear.className = 'on'; gear.setAttribute('aria-expanded', 'true'); }
+  function closeTune() { tune.hidden = true; gear.className = ''; gear.setAttribute('aria-expanded', 'false'); }
+  gear.onclick = function () { if (tune.hidden) openTune(); else closeTune(); };
+  document.addEventListener('mousedown', function (e) {
+    if (!tune.hidden && !tune.contains(e.target) && e.target !== gear && !gear.contains(e.target)) closeTune();
+  });
+  document.addEventListener('touchstart', function (e) {
+    if (!tune.hidden && !tune.contains(e.target) && !gear.contains(e.target)) closeTune();
+  }, { passive: true });
+
+  /* 1 2 3 4 open the spots, S cycles scenes, D toggles dark. Not while the add/edit panel is open. */
+  window.addEventListener('keydown', function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!editor.hidden) { if (e.key === 'Escape') closeEditor(); return; }
+    if (!tune.hidden && e.key === 'Escape') { closeTune(); return; }
+    var tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    var n = parseInt(e.key, 10), key = (e.key || '').toLowerCase();
+    if (n >= 1 && n <= SLOTS) { if (slots[n - 1]) window.location.href = slots[n - 1].url; return; }
+    if (key === 's') { state.scene = ORDER[(ORDER.indexOf(state.scene) + 1) % ORDER.length]; mount(); }
+    if (key === 'd') { state.dark = !state.dark; mount(); }
+  });
+
+  var resizeTimer = 0;
+  window.addEventListener('resize', function () {
+    if (!SCENES[state.scene].sky) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(starsStart, 150);
+  });
+
+  mount();
+})();
+</script>
+</body>
+</html>
